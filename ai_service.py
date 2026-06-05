@@ -1,11 +1,17 @@
 """Camada LLM — tradução dos vereditos para linguagem do produtor.
 
-Conecta ao LM Studio (servidor OpenAI-compatible local). A LLM **não** calcula
-nem decide nada: recebe (a) um resumo dos dados climáticos e (b) os vereditos já
-calculados por `rules_service.py`, e escreve uma mensagem curta e prática em PT-BR.
+Suporta dois provedores (escolhidos em `config.provedor_llm()`):
+- **Gemini** (Google) — para o projeto publicado na nuvem. Chave via env
+  `GEMINI_API_KEY` (nunca no código).
+- **LM Studio** — servidor local OpenAI-compatible, para desenvolvimento.
 
-Se o LM Studio estiver indisponível, `recomendacao_fallback` gera um texto
-determinístico a partir dos próprios vereditos — o sistema nunca fica sem resposta.
+A LLM **não** calcula nem decide nada: recebe (a) um resumo dos dados climáticos
+e (b) os vereditos já calculados por `rules_service.py`, e escreve uma mensagem
+curta e prática em PT-BR.
+
+Se a LLM estiver indisponível (sem chave, servidor offline, erro), o sistema cai
+em `recomendacao_fallback` — um texto determinístico a partir dos próprios
+vereditos. Nunca fica sem resposta.
 """
 
 from __future__ import annotations
@@ -33,8 +39,8 @@ SYSTEM_PROMPT = (
 )
 
 
-class LMStudioIndisponivel(RuntimeError):
-    """Erro de conexão/timeout/HTTP ao falar com o LM Studio."""
+class LLMIndisponivel(RuntimeError):
+    """Erro ao falar com a LLM (sem chave, offline, timeout, HTTP ou resposta vazia)."""
 
 
 # --------------------------------------------------------------------------- #
@@ -85,42 +91,73 @@ def _montar_mensagem_usuario(
 # --------------------------------------------------------------------------- #
 
 
-def gerar_recomendacao(
-    vereditos: dict[str, Veredito],
-    previsao: Previsao,
-) -> str:
-    """Gera o texto final via LM Studio.
+def _chamar_gemini(system: str, usuario: str) -> str:
+    """Chama a API REST da Gemini (generateContent). Raises LLMIndisponivel."""
+    api_key = config.gemini_api_key()
+    if not api_key:
+        raise LLMIndisponivel("GEMINI_API_KEY não definida.")
 
-    Raises:
-        LMStudioIndisponivel: se o servidor não responder ou retornar erro.
-    """
+    url = f"{config.GEMINI_BASE_URL}/{config.gemini_modelo()}:generateContent"
     payload = {
-        "model": config.LM_STUDIO_MODELO,
-        "temperature": config.LM_STUDIO_TEMPERATURA,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": _montar_mensagem_usuario(
-                    vereditos, resumir_clima(previsao)
-                ),
-            },
-        ],
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": usuario}]}],
+        "generationConfig": {"temperature": config.LLM_TEMPERATURA},
     }
     try:
         resposta = requests.post(
-            config.LM_STUDIO_URL,
+            url,
+            params={"key": api_key},
             json=payload,
             timeout=config.TIMEOUT_HTTP,
         )
         resposta.raise_for_status()
     except requests.RequestException as exc:
-        raise LMStudioIndisponivel(
+        raise LLMIndisponivel(f"Falha ao chamar a Gemini: {exc}") from exc
+
+    dados = resposta.json()
+    try:
+        return dados["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError) as exc:
+        # Sem candidatos (ex.: conteúdo bloqueado por filtro de segurança).
+        raise LLMIndisponivel(f"Resposta vazia da Gemini: {dados}") from exc
+
+
+def _chamar_lmstudio(system: str, usuario: str) -> str:
+    """Chama o LM Studio (OpenAI-compatible). Raises LLMIndisponivel."""
+    payload = {
+        "model": config.LM_STUDIO_MODELO,
+        "temperature": config.LLM_TEMPERATURA,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": usuario},
+        ],
+    }
+    try:
+        resposta = requests.post(
+            config.LM_STUDIO_URL, json=payload, timeout=config.TIMEOUT_HTTP
+        )
+        resposta.raise_for_status()
+    except requests.RequestException as exc:
+        raise LLMIndisponivel(
             f"Não foi possível falar com o LM Studio em {config.LM_STUDIO_URL}: {exc}"
         ) from exc
 
-    dados = resposta.json()
-    return dados["choices"][0]["message"]["content"].strip()
+    return resposta.json()["choices"][0]["message"]["content"].strip()
+
+
+def gerar_recomendacao(
+    vereditos: dict[str, Veredito],
+    previsao: Previsao,
+) -> str:
+    """Gera o texto final usando o provedor configurado (Gemini ou LM Studio).
+
+    Raises:
+        LLMIndisponivel: se o provedor não responder ou retornar erro.
+    """
+    usuario = _montar_mensagem_usuario(vereditos, resumir_clima(previsao))
+    if config.provedor_llm() == "gemini":
+        return _chamar_gemini(SYSTEM_PROMPT, usuario)
+    return _chamar_lmstudio(SYSTEM_PROMPT, usuario)
 
 
 def recomendacao_fallback(vereditos: dict[str, Veredito]) -> str:
@@ -148,7 +185,7 @@ def gerar_recomendacao_segura(
     """
     try:
         return gerar_recomendacao(vereditos, previsao), True
-    except LMStudioIndisponivel:
+    except LLMIndisponivel:
         return recomendacao_fallback(vereditos), False
 
 
@@ -160,5 +197,6 @@ if __name__ == "__main__":
     prev = buscar_previsao()
     vers = avaliar_previsao(prev)
     texto, usou_llm = gerar_recomendacao_segura(vers, prev)
-    print(f"[{'LM Studio' if usou_llm else 'fallback'}]\n")
+    fonte = config.provedor_llm() if usou_llm else "fallback determinístico"
+    print(f"[provedor: {fonte}]\n")
     print(texto)

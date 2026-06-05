@@ -9,7 +9,17 @@ Os thresholds agronômicos são pontos de partida — revisar com fonte técnica
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+
+# Carrega variáveis de um arquivo .env local (se existir), sem sobrescrever as já
+# definidas no ambiente. Em deploy (sem .env) isso é simplesmente ignorado.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:  # python-dotenv não instalado — segue com o ambiente do SO
+    pass
 
 
 # --------------------------------------------------------------------------- #
@@ -83,9 +93,43 @@ THRESHOLDS = Thresholds()
 
 
 # --------------------------------------------------------------------------- #
-# LLM local (LM Studio) — usado apenas na Fase 3
+# Camada LLM (Fase 3) — escolha de provedor
 # --------------------------------------------------------------------------- #
+#
+# Nenhum segredo fica no código: a chave da Gemini vem de variável de ambiente
+# (GEMINI_API_KEY). Em deploy no Streamlit Cloud, defina-a em "Secrets" — o app
+# faz a ponte para a variável de ambiente.
+#
+# Provedor: "auto"   -> usa Gemini se houver chave, senão LM Studio local.
+#           "gemini" -> força Gemini (nuvem, para publicação).
+#           "lmstudio" -> força LM Studio (local, sem custo, sem internet).
 
+LLM_TEMPERATURA: float = 0.3
+
+# Gemini (Google Generative Language API) ------------------------------------
+GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/models"
+
+# LM Studio (servidor OpenAI-compatible local, para desenvolvimento) ----------
 LM_STUDIO_URL: str = "http://localhost:1234/v1/chat/completions"
 LM_STUDIO_MODELO: str = "llama-3.1-8b-instruct"
-LM_STUDIO_TEMPERATURA: float = 0.3
+
+
+# As funções abaixo leem o ambiente em tempo de chamada (não no import), para que
+# o app possa injetar a chave a partir de st.secrets antes do primeiro uso.
+
+def gemini_api_key() -> str:
+    """Chave da Gemini, vinda da variável de ambiente GEMINI_API_KEY."""
+    return os.environ.get("GEMINI_API_KEY", "")
+
+
+def gemini_modelo() -> str:
+    """Modelo Gemini (configurável por env), com padrão leve e barato."""
+    return os.environ.get("GEMINI_MODELO", "gemini-2.5-flash")
+
+
+def provedor_llm() -> str:
+    """Provedor efetivo: "gemini", "lmstudio" ou resolução do modo "auto"."""
+    provider = os.environ.get("LLM_PROVIDER", "auto").lower()
+    if provider == "auto":
+        return "gemini" if gemini_api_key() else "lmstudio"
+    return provider

@@ -8,9 +8,20 @@ Rodar:  streamlit run app.py
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
 
 import streamlit as st
+
+# Ponte para deploy: no Streamlit Cloud, segredos definidos em "Secrets" ficam em
+# st.secrets. Copiamos para variáveis de ambiente (sem sobrescrever as já
+# existentes) para que config.* enxergue a chave. Roda antes de qualquer uso da LLM.
+for _chave in ("GEMINI_API_KEY", "GEMINI_MODELO", "LLM_PROVIDER"):
+    try:
+        if _chave in st.secrets:
+            os.environ.setdefault(_chave, str(st.secrets[_chave]))
+    except Exception:
+        pass  # sem arquivo de secrets em ambiente local — tudo bem
 
 import config
 from ai_service import gerar_recomendacao_segura
@@ -171,8 +182,9 @@ def _texto_llm(vereditos: dict[str, Veredito], previsao: Previsao) -> None:
     else:
         st.info(texto)
         st.caption(
-            "⚠️ LM Studio offline — texto gerado pelas regras. "
-            "Inicie o servidor local para o resumo em linguagem natural."
+            "⚠️ IA indisponível — texto gerado pelas regras. "
+            "Configure a chave da Gemini (GEMINI_API_KEY) ou rode o LM Studio local "
+            "para o resumo em linguagem natural."
         )
 
 
