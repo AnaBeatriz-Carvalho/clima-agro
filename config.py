@@ -123,8 +123,13 @@ def gemini_api_key() -> str:
 
 
 def gemini_modelo() -> str:
-    """Modelo Gemini (configurável por env), com padrão leve e barato."""
-    return os.environ.get("GEMINI_MODELO", "gemini-2.5-flash")
+    """Modelo Gemini (configurável por env). Padrão: gemini-flash-latest.
+
+    Aponta para o flash mais recente — funciona no free-tier (os modelos Pro,
+    como gemini-3-pro-preview, exigem billing e retornam 429 sem ele). Ajuste
+    com a env GEMINI_MODELO se ativar billing e quiser um modelo Pro.
+    """
+    return os.environ.get("GEMINI_MODELO", "gemini-flash-latest")
 
 
 def provedor_llm() -> str:

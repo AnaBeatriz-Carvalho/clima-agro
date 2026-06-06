@@ -16,6 +16,8 @@ vereditos. Nunca fica sem resposta.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import requests
 
 import config
@@ -30,6 +32,9 @@ SYSTEM_PROMPT = (
     "simples, como se conversasse com a pessoa.\n"
     "REGRAS:\n"
     "- NÃO invente números. NÃO recalcule. Use SOMENTE os números fornecidos.\n"
+    "- Para se referir aos dias, use EXATAMENTE o rótulo no campo 'quando' de cada "
+    "dia (Hoje, Amanhã, Sábado, etc.). NÃO calcule datas nem dias da semana por "
+    "conta própria — você não sabe o calendário, então confie apenas no rótulo dado.\n"
     "- Este é apenas um site informativo. NÃO peça para a pessoa entrar em contato, "
     "NÃO mande 'falar conosco', NÃO ofereça suporte nem prometa ajuda.\n"
     "- NÃO mande tomar providências genéricas ('procure um técnico', 'tome outras "
@@ -37,6 +42,29 @@ SYSTEM_PROMPT = (
     "- NÃO assine, NÃO se despeça formalmente, NÃO use '[Seu nome]'.\n"
     "- Comece direto pela informação mais importante (vai chover ou não, e quanto)."
 )
+
+_DIAS_SEMANA = [
+    "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sábado", "domingo",
+]
+
+
+def _rotulo_dia(iso: str) -> str:
+    """Rótulo determinístico do dia ('Hoje', 'Amanhã' ou dia da semana).
+
+    A LLM não sabe a data de hoje e erra ao deduzir 'hoje/amanhã' de uma data ISO;
+    por isso o cálculo é feito aqui e entregue pronto.
+    """
+    try:
+        d = datetime.strptime(iso, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return iso
+    delta = (d - date.today()).days
+    if delta == 0:
+        return "Hoje"
+    if delta == 1:
+        return "Amanhã"
+    return _DIAS_SEMANA[d.weekday()].capitalize()
 
 
 class LLMIndisponivel(RuntimeError):
@@ -53,6 +81,7 @@ def resumir_clima(previsao: Previsao, dias: int = 3) -> dict[str, object]:
     d = previsao.daily
     atual = previsao.current
     return {
+        "data_de_hoje": date.today().isoformat(),
         "agora": {
             "temperatura_c": atual.temperature_2m,
             "umidade_pct": atual.relative_humidity_2m,
@@ -61,6 +90,7 @@ def resumir_clima(previsao: Previsao, dias: int = 3) -> dict[str, object]:
         },
         "proximos_dias": [
             {
+                "quando": _rotulo_dia(d.time[i]),
                 "dia": d.time[i],
                 "chuva_mm": d.precipitation_sum[i],
                 "prob_chuva_pct": d.precipitation_probability_max[i],

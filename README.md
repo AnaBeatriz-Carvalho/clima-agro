@@ -28,7 +28,8 @@ clara em português — **nunca recalcula nem inventa números**.
 | `tests/test_rules.py` | testes das regras (pytest) | 2 ✅ |
 | `ai_service.py` | IA: Gemini (nuvem) ou LM Studio (local) + fallback | 3 ✅ |
 | `charts.py` | gráficos Plotly (chuva e temperatura) | 4 ✅ |
-| `app.py` | interface Streamlit | 4 ✅ |
+| `ui.py` | camada visual (CSS + blocos HTML, tema claro/escuro) | 4 ✅ |
+| `app.py` | interface Streamlit (orquestração) | 4 ✅ |
 
 ## Setup
 
@@ -48,6 +49,10 @@ streamlit run app.py
 
 Busca por cidade ou coordenadas, condições atuais, vereditos, resumo da LLM e
 gráficos de chuva/temperatura.
+
+A interface segue o design "Clima do dia" (estética desenhada à mão, azul-clima,
+semáforo de cor nos vereditos, emojis) com **toggle de tema claro/escuro** na barra
+lateral. Todo o visual (CSS e blocos HTML) vive em `ui.py`; o `app.py` só orquestra.
 
 Scripts de linha de comando (teste manual de cada camada):
 
@@ -77,7 +82,10 @@ código.
 1. Crie uma chave em <https://aistudio.google.com/apikey> (free tier suficiente).
 2. Local: copie `.env.example` para `.env` e preencha `GEMINI_API_KEY`
    (ou exporte a variável no terminal).
-3. Modelo padrão: `gemini-2.5-flash` (leve/barato). Ajuste com `GEMINI_MODELO`.
+3. Modelo padrão: `gemini-flash-latest` (aponta para o flash mais novo, funciona no
+   free-tier). Ajuste com `GEMINI_MODELO`. ⚠️ Os modelos **Pro** (`gemini-2.5-pro`,
+   `gemini-3-pro-preview`) exigem **billing ativo** — sem ele retornam `429` e o app
+   cai no texto offline determinístico.
 
 **LM Studio (local):** rode um modelo (ex.: Llama 3.1 8B Instruct ou Qwen 2.5 7B)
 com o servidor local ativo em `localhost:1234`.
@@ -110,4 +118,5 @@ Ajuste `config.py`:
 - [x] Fase 3 — LLM (`ai_service.py` via LM Studio + fallback offline)
 - [x] Fase 4 — interface (Streamlit + Plotly)
 - [x] Fase 5 — geocoding por nome de cidade (`buscar_cidade`)
-- [ ] Fase 5 (extra) — histórico de 30 dias, deploy
+- [x] Fase 6 — redesign "Clima do dia" (`ui.py`, tema claro/escuro) — ver `HANDOFF.md`
+- [ ] Fase 6 (extra) — histórico de 30 dias, deploy
