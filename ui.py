@@ -16,6 +16,7 @@ from datetime import date, datetime
 
 import streamlit as st
 
+import config
 from rules_service import Veredito
 from weather_service import Previsao
 
@@ -120,6 +121,18 @@ CSS_BASE = """
   .hero .r-row{display:flex;justify-content:space-between;font-size:16px;border-bottom:1.4px dashed var(--line);padding-bottom:6px;color:var(--ink);}
   .hero .scene{font-size:64px;text-align:center;}
 
+  /* banner "vai chover hoje?" — primeiro destaque, bem evidente */
+  .rain-banner{
+    display:flex;align-items:center;gap:18px;padding:18px 24px;margin:4px 4px 16px;
+    background:var(--cs);border:2.4px solid var(--c);
+  }
+  .rain-banner .rb-emoji{font-size:54px;line-height:1;flex:0 0 auto;}
+  .rain-banner .rb-title{
+    font-family:'Patrick Hand',sans-serif;font-size:36px;font-weight:700;
+    line-height:1.05;color:var(--c);letter-spacing:.5px;
+  }
+  .rain-banner .rb-sub{font-size:18px;color:var(--ink);margin-top:2px;}
+
   /* chips */
   .chips{display:flex;flex-wrap:wrap;gap:10px;margin:0 4px;}
   .pill{
@@ -153,13 +166,19 @@ CSS_BASE = """
   }
   .ai.s-warn{border-left-color:var(--warn);}
 
-  /* previsão em cartões */
-  .fc-cards{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;}
-  .fc-card{min-width:104px;flex:0 0 auto;padding:14px 12px;text-align:center;display:flex;flex-direction:column;gap:6px;align-items:center;}
+  /* previsão em cartões — grade que se ajusta à largura (sem cortar o último) */
+  .fc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;padding:2px 2px 6px;}
+  .fc-card{min-width:0;padding:14px 12px;text-align:center;display:flex;flex-direction:column;gap:5px;align-items:center;border-top:6px solid var(--c);}
   .fc-card .d{font-size:15px;color:var(--muted);}
   .fc-card .e{font-size:30px;}
+  .fc-card .fc-rain{
+    font-family:'Patrick Hand',sans-serif;font-size:15px;font-weight:700;
+    color:#fff;background:var(--c);border-radius:999px;padding:1px 12px;
+  }
+  .fc-card .fc-det{font-size:13px;color:var(--c);font-weight:700;}
   .fc-card .t{font-family:'Patrick Hand',sans-serif;font-size:20px;color:var(--ink);}
-  .fc-card .mm{font-size:13px;color:var(--accent);}
+  .fc-card .fc-wind{font-size:12px;color:var(--muted);}
+  .fc-card .fc-alert{font-size:13px;color:var(--stop);font-weight:700;line-height:1.3;margin-top:2px;}
 
   @media(max-width:760px){
     .hero{grid-template-columns:1fr;text-align:center;}
@@ -244,6 +263,77 @@ def resumo_chuva(mm: float | None, prob: float | None) -> tuple[str, str]:
     return "☀️", "Sem chuva"
 
 
+def veredito_chuva(
+    mm: float | None, prob: float | None
+) -> tuple[bool, str, str, str, str]:
+    """Resposta direta "vai chover?" para destaque na tela.
+
+    Returns:
+        (vai_chover, titulo, detalhe, classe_cor, emoji) — `titulo` em CAIXA ALTA
+        para o banner ('VAI CHOVER', 'NÃO VAI CHOVER', etc.) e `rotulo_curto` via
+        `titulo` é derivado pelo chamador quando precisa de versão curta.
+    """
+    mm = mm or 0.0
+    prob = prob or 0.0
+    if mm >= 20:
+        return True, "VAI CHOVER FORTE", f"cerca de {mm:.0f} mm", "s-stop", "⛈️"
+    if mm >= 5:
+        return True, "VAI CHOVER", f"cerca de {mm:.0f} mm", "s-info", "🌧️"
+    if mm >= 1:
+        return True, "CHUVA FRACA", f"cerca de {mm:.0f} mm", "s-info", "🌦️"
+    if prob >= 50:
+        return True, "PODE CHOVER", f"chance de {prob:.0f}%", "s-warn", "🌥️"
+    return False, "NÃO VAI CHOVER", "tempo seco hoje", "s-go", "☀️"
+
+
+def descricao_chuva_curta(
+    mm: float | None, prob: float | None
+) -> tuple[str, str, str]:
+    """Rótulo curto e descritivo da chuva do dia, p/ os cartões dos 7 dias.
+
+    Returns:
+        (emoji, rótulo, classe_cor) — ex.: ('🌦️', 'Chuva leve', 's-info').
+    """
+    mm = mm or 0.0
+    prob = prob or 0.0
+    if mm >= 20:
+        return "⛈️", "Chuva forte", "s-stop"
+    if mm >= 5:
+        return "🌧️", "Chuva", "s-info"
+    if mm >= 1:
+        return "🌦️", "Chuva leve", "s-info"
+    if prob >= 50:
+        return "🌥️", "Pode chover", "s-warn"
+    if prob >= 20:
+        return "🌤️", "Pouca chance", "s-go"
+    return "☀️", "Seco", "s-go"
+
+
+def detalhe_chuva(mm: float | None, prob: float | None) -> str:
+    """Linha de detalhe da chuva: quanto (mm) e/ou a chance (%)."""
+    mm = mm or 0.0
+    prob = prob or 0.0
+    if mm >= 1:
+        return f"{mm:.0f} mm" + (f" · {prob:.0f}%" if prob else "")
+    if prob >= 20:
+        return f"{prob:.0f}% de chance"
+    return "tempo seco"
+
+
+def alertas_dia(
+    tmin: float | None, tmax: float | None, vento: float | None
+) -> list[str]:
+    """Avisos importantes do dia (geada, ventania, calor forte) — pode ser vazio."""
+    avisos: list[str] = []
+    if tmin is not None and tmin <= config.THRESHOLDS.geada_temp_min_c:
+        avisos.append("❄️ Risco de geada")
+    if vento is not None and vento >= 35:
+        avisos.append("🌬️ Ventania")
+    if tmax is not None and tmax >= 35:
+        avisos.append("🔥 Calor forte")
+    return avisos
+
+
 # --------------------------------------------------------------------------- #
 # Blocos de HTML (Direção C)
 # --------------------------------------------------------------------------- #
@@ -297,6 +387,22 @@ def bloco_heroi(previsao: Previsao) -> str:
     </div>""")
 
 
+def bloco_aviso_chuva(previsao: Previsao) -> str:
+    """Banner grande e direto: vai chover hoje ou não (primeiro destaque da tela)."""
+    d = previsao.daily
+    mm = d.precipitation_sum[0] if d.precipitation_sum else 0.0
+    prob = d.precipitation_probability_max[0] if d.precipitation_probability_max else 0.0
+    _vai, titulo, detalhe, classe, emoji = veredito_chuva(mm, prob)
+    return _clean(f"""
+    <div class="rain-banner sk {classe}">
+      <span class="rb-emoji emoji">{emoji}</span>
+      <div class="rb-text">
+        <div class="rb-title">{titulo} HOJE</div>
+        <div class="rb-sub">{detalhe}</div>
+      </div>
+    </div>""")
+
+
 def _meta_veredito(tema: str, v: Veredito) -> tuple[str, str, str, str]:
     """Devolve (emoji, nome, classe_cor, badge) para um veredito."""
     emoji, nome = TEMA_INFO.get(tema, ("•", tema))
@@ -346,22 +452,42 @@ def bloco_resumo(texto: str, usou_llm: bool) -> str:
 def bloco_previsao(previsao: Previsao, n: int = 7) -> str:
     """Cartões horizontais com a previsão dos próximos dias."""
     d = previsao.daily
+
+    def _temp(v: float | None) -> str:
+        return f"{v:.0f}°" if v is not None else "—"
+
+    def _campo(lista: list, i: int):
+        return lista[i] if i < len(lista) else None
+
     cartoes = []
     for i in range(min(n, len(d.time))):
-        emoji, _ = resumo_chuva(
-            d.precipitation_sum[i], d.precipitation_probability_max[i]
+        mm = d.precipitation_sum[i] if i < len(d.precipitation_sum) else 0.0
+        prob = _campo(d.precipitation_probability_max, i)
+        emoji, rotulo, classe = descricao_chuva_curta(mm, prob)
+        det = detalhe_chuva(mm, prob)
+        tmin = _campo(d.temperature_2m_min, i)
+        tmax = _campo(d.temperature_2m_max, i)
+        vento = _campo(d.wind_speed_10m_max, i)
+
+        vento_html = (
+            f'<span class="fc-wind">🌬️ {vento:.0f} km/h</span>'
+            if vento is not None
+            else ""
         )
-        mm = d.precipitation_sum[i] or 0.0
-        mm_txt = f"{mm:.0f} mm" if mm >= 1 else "—"
-        tmin = d.temperature_2m_min[i]
-        tmax = d.temperature_2m_max[i]
+        avisos = alertas_dia(tmin, tmax, vento)
+        avisos_html = (
+            f'<span class="fc-alert">{"<br>".join(avisos)}</span>' if avisos else ""
+        )
         cartoes.append(
             _clean(f"""
-            <div class="fc-card sk">
+            <div class="fc-card sk {classe}">
               <span class="d">{nome_do_dia(d.time[i])}</span>
               <span class="e emoji">{emoji}</span>
-              <span class="t">{tmin:.0f}° a {tmax:.0f}°</span>
-              <span class="mm">{mm_txt}</span>
+              <span class="fc-rain">{rotulo}</span>
+              <span class="fc-det">{det}</span>
+              <span class="t">{_temp(tmin)} a {_temp(tmax)}</span>
+              {vento_html}
+              {avisos_html}
             </div>""")
         )
     return _clean(f'<div class="fc-cards">{"".join(cartoes)}</div>')
