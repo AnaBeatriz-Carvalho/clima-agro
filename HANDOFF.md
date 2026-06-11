@@ -3,7 +3,7 @@
 Documento de passagem de contexto: estado atual do projeto, decisões recentes e
 pontos de atenção para quem (pessoa ou agente) continuar o trabalho.
 
-_Última atualização: 2026-06-05._
+_Última atualização: 2026-06-10._
 
 ## O que é
 
@@ -57,12 +57,27 @@ Dados (Open-Meteo) → Regras determinísticas (Python) → LLM (só tradução)
 4. **Deprecação corrigida:** `st.plotly_chart(..., use_container_width=True)` →
    `width="stretch"` em `app.py`.
 
+5. **Robustez da LLM + diagnóstico do 429 (branch `developer`).** O sintoma "1ª busca
+   mostra IA offline, 2ª funciona" era **cota do free-tier (429)**, não cold-start. Em
+   `ai_service.py`:
+   - O motivo do erro agora vai pro log (antes era engolido em silêncio) — foi ele que
+     revelou o 429.
+   - **Retry curto** (2 tentativas) só para falhas de conexão/timeout/5xx. O **429 de
+     cota cai no fallback offline na hora** — retry não ajuda (cota não reseta em
+     segundos) e só fazia o usuário esperar ~44s.
+   - **Modelo recomendado para free-tier → `gemini-flash-lite-latest`** (no `.env` e
+     `.env.example`). Os modelos "lite" têm cota grátis maior; a cota é **por modelo**,
+     então um lite "novo" tem cota fresca.
+
 ## Pontos de atenção
 
-- **Modelos Pro exigem billing.** No free-tier da chave atual, `gemini-2.5-pro` e
-  `gemini-3-pro-preview` retornam **429 (Too Many Requests)** e o app cai no texto
-  offline. Só os modelos **flash** respondem. Para usar um Pro, ative billing no Google
-  AI Studio e troque `GEMINI_MODELO`.
+- **Cota do free-tier (429).** Mesmo nos modelos flash, o free-tier tem limite de
+  requisições e retorna **429 (cota excedida)** quando estoura — o app então cai no texto
+  offline (na hora, ver mudança 5). A cota é **por modelo**: prefira `gemini-flash-lite-latest`
+  (cota grátis maior) e, se estourar, troque por outro lite (`gemini-2.5-flash-lite`).
+  Para acabar de vez com o 429, ative **billing** no Google AI Studio.
+- **Modelos Pro exigem billing.** `gemini-2.5-pro` e `gemini-3-pro-preview` retornam
+  **429** no free-tier. Para usá-los, ative billing e troque `GEMINI_MODELO`.
 - **Segredos:** `.env` (com `GEMINI_API_KEY`) está no `.gitignore` — não versionar. Em
   deploy (Streamlit Cloud), usar **Settings → Secrets**; `app.py` faz a ponte de
   `st.secrets` para variáveis de ambiente.

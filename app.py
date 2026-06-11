@@ -125,6 +125,9 @@ def main() -> None:
     # Herói (tempo agora)
     st.markdown(ui.bloco_heroi(previsao), unsafe_allow_html=True)
 
+    # Aviso grande "vai chover hoje?" — resposta direta, antes dos detalhes
+    st.markdown(ui.bloco_aviso_chuva(previsao), unsafe_allow_html=True)
+
     # Recomendações de hoje: chips (resumo) + cards (semáforo)
     st.markdown('<h3 class="sec">Recomendações de hoje</h3>', unsafe_allow_html=True)
     st.markdown(ui.bloco_chips(vereditos), unsafe_allow_html=True)
