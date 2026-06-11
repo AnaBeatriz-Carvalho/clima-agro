@@ -19,6 +19,7 @@ import time
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -129,6 +130,12 @@ def _vereditos_out(previsao: Previsao) -> dict[str, VereditoOut]:
 # --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
+
+
+@app.get("/", include_in_schema=False)
+def raiz() -> RedirectResponse:
+    """Redireciona a URL base para a documentação interativa (evita 404 na raiz)."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/saude", tags=["meta"], summary="Health check")
