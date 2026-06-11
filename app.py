@@ -136,13 +136,12 @@ def main() -> None:
     # Resumo da IA
     st.markdown('<h3 class="sec">Resumo para o produtor</h3>', unsafe_allow_html=True)
     with st.spinner("Gerando recomendação..."):
-        texto, usou_llm = gerar_recomendacao_segura(vereditos, previsao)
+        texto, usou_llm, motivo = gerar_recomendacao_segura(vereditos, previsao)
     st.markdown(ui.bloco_resumo(texto, usou_llm), unsafe_allow_html=True)
     if not usou_llm:
         st.caption(
-            "⚠️ IA indisponível — texto gerado pelas regras. "
-            "Configure a chave da Gemini (GEMINI_API_KEY) ou rode o LM Studio local "
-            "para o resumo em linguagem natural."
+            f"⚠️ IA indisponível — {motivo} O texto acima foi gerado pelas regras. "
+            "Se persistir, tente buscar de novo em instantes."
         )
 
     # Previsão dos próximos 7 dias

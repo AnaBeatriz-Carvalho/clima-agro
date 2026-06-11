@@ -253,21 +253,40 @@ def recomendacao_fallback(vereditos: dict[str, Veredito]) -> str:
     return "\n".join(linhas)
 
 
+def _motivo_amigavel(exc: LLMIndisponivel) -> str:
+    """Traduz o erro técnico da LLM em uma frase curta para mostrar na tela."""
+    msg = str(exc).lower()
+    if "429" in msg or "cota" in msg or "quota" in msg:
+        return (
+            "limite de uso gratuito da IA atingido (cota). Tente de novo em alguns "
+            "minutos ou use um modelo 'lite' (GEMINI_MODELO=gemini-flash-lite-latest)."
+        )
+    if "gemini_api_key" in msg or "não definida" in msg:
+        return "a chave da IA não está configurada (GEMINI_API_KEY)."
+    if "timeout" in msg or "timed out" in msg or "read timed out" in msg:
+        return "a IA demorou demais para responder (comum no primeiro acesso após o app 'acordar')."
+    if "lm studio" in msg:
+        return "o servidor local de IA (LM Studio) não respondeu."
+    return "falha temporária ao falar com a IA."
+
+
 def gerar_recomendacao_segura(
     vereditos: dict[str, Veredito],
     previsao: Previsao,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, str]:
     """Tenta a LLM; cai no fallback determinístico se ela estiver indisponível.
 
     Returns:
-        (texto, usou_llm). `usou_llm=False` indica que veio do fallback.
+        (texto, usou_llm, motivo). `usou_llm=False` indica que veio do fallback;
+        nesse caso `motivo` traz a explicação amigável do porquê (senão é "").
     """
     try:
-        return gerar_recomendacao(vereditos, previsao), True
+        return gerar_recomendacao(vereditos, previsao), True, ""
     except LLMIndisponivel as exc:
-        # Antes o motivo era engolido em silêncio; logamos para facilitar o diagnóstico.
+        # Antes o motivo era engolido em silêncio; logamos (vai pros logs do deploy)
+        # e devolvemos a versão amigável para a interface mostrar.
         print(f"[ai_service] LLM indisponível, usando fallback: {exc}")
-        return recomendacao_fallback(vereditos), False
+        return recomendacao_fallback(vereditos), False, _motivo_amigavel(exc)
 
 
 if __name__ == "__main__":
@@ -277,7 +296,10 @@ if __name__ == "__main__":
 
     prev = buscar_previsao()
     vers = avaliar_previsao(prev)
-    texto, usou_llm = gerar_recomendacao_segura(vers, prev)
+    texto, usou_llm, motivo = gerar_recomendacao_segura(vers, prev)
     fonte = config.provedor_llm() if usou_llm else "fallback determinístico"
-    print(f"[provedor: {fonte}]\n")
+    print(f"[provedor: {fonte}]")
+    if motivo:
+        print(f"[motivo do fallback: {motivo}]")
+    print()
     print(texto)
