@@ -16,6 +16,7 @@ vereditos. Nunca fica sem resposta.
 
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 
 import requests
@@ -23,6 +24,16 @@ import requests
 import config
 from rules_service import Veredito
 from weather_service import Previsao
+
+
+# Falhas transitórias (conexão fria, timeout, servidor sobrecarregado) costumam
+# passar numa segunda tentativa — por isso tentamos mais uma vez antes de
+# desistir e cair no fallback offline.
+# O 429 (cota excedida) fica DE FORA: a cota não reseta em segundos, então retry
+# só faria o usuário esperar à toa — nesse caso caímos direto no texto offline.
+_TENTATIVAS_LLM = 2
+_BACKOFF_SEGUNDOS = 2.0
+_STATUS_TRANSITORIOS = {500, 502, 503, 504}
 
 
 SYSTEM_PROMPT = (
@@ -68,7 +79,15 @@ def _rotulo_dia(iso: str) -> str:
 
 
 class LLMIndisponivel(RuntimeError):
-    """Erro ao falar com a LLM (sem chave, offline, timeout, HTTP ou resposta vazia)."""
+    """Erro ao falar com a LLM (sem chave, offline, timeout, HTTP ou resposta vazia).
+
+    `transitorio=True` marca falhas que costumam passar numa nova tentativa
+    (timeout, conexão recusada, 5xx, 429); nesses casos vale fazer retry.
+    """
+
+    def __init__(self, mensagem: str, *, transitorio: bool = False) -> None:
+        super().__init__(mensagem)
+        self.transitorio = transitorio
 
 
 # --------------------------------------------------------------------------- #
@@ -140,6 +159,24 @@ def _chamar_gemini(system: str, usuario: str) -> str:
             json=payload,
             timeout=config.TIMEOUT_HTTP,
         )
+    except requests.RequestException as exc:
+        # Timeout, DNS, conexão recusada — tipicamente passa numa nova tentativa.
+        raise LLMIndisponivel(
+            f"Falha ao chamar a Gemini: {exc}", transitorio=True
+        ) from exc
+
+    if resposta.status_code == 429:
+        # Cota excedida (free-tier). Não adianta retry: cai no offline na hora.
+        raise LLMIndisponivel(
+            f"Cota da Gemini excedida (429): {resposta.text[:200]}"
+        )
+    if resposta.status_code in _STATUS_TRANSITORIOS:
+        # 5xx (sobrecarga momentânea do servidor) — vale uma nova tentativa.
+        raise LLMIndisponivel(
+            f"Gemini retornou {resposta.status_code} (momentâneo): {resposta.text[:200]}",
+            transitorio=True,
+        )
+    try:
         resposta.raise_for_status()
     except requests.RequestException as exc:
         raise LLMIndisponivel(f"Falha ao chamar a Gemini: {exc}") from exc
@@ -169,7 +206,8 @@ def _chamar_lmstudio(system: str, usuario: str) -> str:
         resposta.raise_for_status()
     except requests.RequestException as exc:
         raise LLMIndisponivel(
-            f"Não foi possível falar com o LM Studio em {config.LM_STUDIO_URL}: {exc}"
+            f"Não foi possível falar com o LM Studio em {config.LM_STUDIO_URL}: {exc}",
+            transitorio=True,
         ) from exc
 
     return resposta.json()["choices"][0]["message"]["content"].strip()
@@ -185,9 +223,20 @@ def gerar_recomendacao(
         LLMIndisponivel: se o provedor não responder ou retornar erro.
     """
     usuario = _montar_mensagem_usuario(vereditos, resumir_clima(previsao))
-    if config.provedor_llm() == "gemini":
-        return _chamar_gemini(SYSTEM_PROMPT, usuario)
-    return _chamar_lmstudio(SYSTEM_PROMPT, usuario)
+    chamar = _chamar_gemini if config.provedor_llm() == "gemini" else _chamar_lmstudio
+
+    # Retry em falhas transitórias: a 1ª chamada (conexão fria, modelo "acordando")
+    # costuma falhar e a seguinte passar — antes isso já caía no fallback offline.
+    ultimo_erro: LLMIndisponivel | None = None
+    for tentativa in range(_TENTATIVAS_LLM):
+        try:
+            return chamar(SYSTEM_PROMPT, usuario)
+        except LLMIndisponivel as exc:
+            ultimo_erro = exc
+            if not exc.transitorio or tentativa == _TENTATIVAS_LLM - 1:
+                raise
+            time.sleep(_BACKOFF_SEGUNDOS * (tentativa + 1))
+    raise ultimo_erro  # pragma: no cover — laço sempre retorna ou levanta antes
 
 
 def recomendacao_fallback(vereditos: dict[str, Veredito]) -> str:
@@ -215,7 +264,9 @@ def gerar_recomendacao_segura(
     """
     try:
         return gerar_recomendacao(vereditos, previsao), True
-    except LLMIndisponivel:
+    except LLMIndisponivel as exc:
+        # Antes o motivo era engolido em silêncio; logamos para facilitar o diagnóstico.
+        print(f"[ai_service] LLM indisponível, usando fallback: {exc}")
         return recomendacao_fallback(vereditos), False
 
 
