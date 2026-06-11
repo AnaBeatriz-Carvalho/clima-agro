@@ -1,8 +1,8 @@
 """Interface Streamlit do clima-agro (Fase 4 · redesign "Clima do dia").
 
 Reúne as camadas: busca a previsão (Open-Meteo), aplica as regras determinísticas,
-pede a tradução à LLM (com fallback) e mostra tudo no visual desenhado no Claude
-Design (Direção C): herói grande, recomendações com semáforo de cor, resumo da IA e
+pede a tradução à LLM (com fallback) e mostra tudo no visual desenhado
+(Direção C): herói grande, recomendações com semáforo de cor, resumo da IA e
 previsão de 7 dias em cartões — com tema claro/escuro.
 
 A camada visual (CSS + blocos HTML) vive em `ui.py`; aqui ficam só a orquestração

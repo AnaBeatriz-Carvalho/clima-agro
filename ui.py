@@ -1,6 +1,6 @@
 """Camada visual da interface (Direção C — "Clima do dia").
 
-Recria, dentro do Streamlit, o wireframe desenhado no Claude Design: estética
+Recria, dentro do Streamlit, um wireframe de referência: estética
 "sketch" (fundo papel, bordas irregulares, fonte manuscrita Patrick Hand),
 azul-clima como destaque, semáforo de cor nos vereditos (verde/âmbar/vermelho),
 emojis mantidos e tema claro + escuro.

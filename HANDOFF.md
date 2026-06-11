@@ -29,8 +29,8 @@ Dados (Open-Meteo) → Regras determinísticas (Python) → LLM (só tradução)
 
 ## Mudanças recentes (esta sessão)
 
-1. **Redesign da interface — Direção C "Clima do dia"** (a partir do wireframe feito
-   no Claude Design). Estética desenhada à mão (fonte Patrick Hand, bordas irregulares
+1. **Redesign da interface — Direção C "Clima do dia"** (a partir de um wireframe de
+   referência). Estética desenhada à mão (fonte Patrick Hand, bordas irregulares
    `.sk`, azul-clima), **semáforo de cor nos vereditos** (verde = ok, âmbar = atenção,
    vermelho = evite), emojis mantidos, **tema claro/escuro** com toggle na sidebar.
    - Toda a apresentação foi extraída para **`ui.py`**: `injetar_css(tema)` injeta o
