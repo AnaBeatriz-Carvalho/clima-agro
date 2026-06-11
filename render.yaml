@@ -1,0 +1,30 @@
+# Blueprint de deploy no Render (https://render.com).
+#
+# Como usar:
+#   1. No Render: New → Blueprint → conecte o repositório e a branch `api`.
+#      (ou New → Web Service e preencha Build/Start Command manualmente).
+#   2. Render lê este arquivo e cria o serviço já configurado.
+#   3. Em Environment, informe o valor de GEMINI_API_KEY (marcado como secreto;
+#      não fica no repositório). GEMINI_MODELO já vem com o padrão recomendado.
+#   4. Deploy. A URL pública (ex.: https://clima-agro-api.onrender.com) expõe a
+#      API e o /docs.
+
+services:
+  - type: web
+    name: clima-agro-api
+    runtime: python
+    plan: free
+    branch: api
+    buildCommand: pip install -r requirements.txt
+    # $PORT é injetado pelo Render; bind em 0.0.0.0 para aceitar tráfego externo.
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Chave secreta — informe o valor no painel do Render (não fica versionada).
+      - key: GEMINI_API_KEY
+        sync: false
+      # Modelo recomendado para o free-tier da Gemini (cota maior, menos 429).
+      - key: GEMINI_MODELO
+        value: gemini-flash-lite-latest
+      # Fixa a versão do Python no build.
+      - key: PYTHON_VERSION
+        value: 3.12.6

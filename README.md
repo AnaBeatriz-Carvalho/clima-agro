@@ -141,6 +141,24 @@ python rules_service.py     # teste manual: vereditos das regras
 python ai_service.py        # teste manual: resumo em PT-BR (com fallback)
 ```
 
+## Deploy (Render)
+
+O repositório já traz um `render.yaml` com build e start prontos. No
+[Render](https://render.com):
+
+1. **New → Blueprint** → conecte o repositório e selecione a branch `api`
+   (ou **New → Web Service** e preencha manualmente os comandos abaixo).
+2. Comandos (já definidos no `render.yaml`):
+   - **Build:** `pip install -r requirements.txt`
+   - **Start:** `uvicorn api:app --host 0.0.0.0 --port $PORT`
+3. Em **Environment**, informe `GEMINI_API_KEY` (secreto). `GEMINI_MODELO` já vem
+   com `gemini-flash-lite-latest`.
+4. **Deploy.** A URL pública (ex.: `https://clima-agro-api.onrender.com`) expõe a
+   API e o `/docs`.
+
+> No plano free o serviço "dorme" após inatividade — a primeira chamada depois de
+> ocioso leva ~30s para acordar. Chamadas seguintes são rápidas.
+
 ## Configuração
 
 Ajuste `config.py`:
