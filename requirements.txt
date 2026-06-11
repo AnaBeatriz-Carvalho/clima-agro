@@ -3,10 +3,6 @@ pydantic>=2.5
 python-dotenv>=1.0
 pytest>=8.0
 
-# Fases posteriores (interface e gráficos)
-streamlit>=1.30
-plotly>=5.18
-
 # API REST (consumida pelo front externo)
 fastapi>=0.110
 uvicorn[standard]>=0.29

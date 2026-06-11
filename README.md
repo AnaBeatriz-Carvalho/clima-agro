@@ -1,35 +1,38 @@
-# clima-agro
+# clima-agro · API
 
-Recomendações agrícolas em linguagem simples a partir de dados meteorológicos da
-[Open-Meteo](https://open-meteo.com/). O sistema responde, para o produtor rural:
+API REST que disponibiliza recomendações agrícolas a partir de dados meteorológicos
+da [Open-Meteo](https://open-meteo.com/). Responde, para o produtor rural:
 
 - Vai chover? Quanto (mm)?
 - É um bom momento para pulverizar?
 - Preciso irrigar?
 - Há risco de geada?
 
+> **Esta branch (`api`) contém apenas o backend/API.** O front-end é desenvolvido
+> separadamente e consome estes endpoints. A interface Streamlit vive na branch `main`.
+
 ## Arquitetura
 
 ```
-Dados (Open-Meteo) → Regras determinísticas (Python) → LLM (apenas tradução)
+Dados (Open-Meteo) → Regras determinísticas (Python) → LLM (apenas tradução) → API REST (FastAPI)
 ```
 
-Todo cálculo e decisão numérica acontece em Python, de forma testável. A LLM
-(local, via LM Studio) apenas traduz os vereditos já calculados para uma mensagem
-clara em português — **nunca recalcula nem inventa números**.
+Todo cálculo e decisão numérica acontece em Python, de forma testável. A LLM apenas
+traduz os vereditos já calculados para uma mensagem clara em português — **nunca
+recalcula nem inventa números**. Se a IA estiver indisponível (sem chave, offline ou
+cota excedida), a API cai em um **texto determinístico** gerado pelas próprias regras:
+nunca fica sem resposta.
 
 ## Estrutura
 
-| Arquivo | Papel | Fase |
-|---|---|---|
-| `config.py` | localização, variáveis da API, thresholds, endpoint LLM | 1 |
-| `weather_service.py` | consumo da Open-Meteo + validação com pydantic | 1 ✅ |
-| `rules_service.py` | camada de regras determinísticas (vereditos) | 2 ✅ |
-| `tests/test_rules.py` | testes das regras (pytest) | 2 ✅ |
-| `ai_service.py` | IA: Gemini (nuvem) ou LM Studio (local) + fallback | 3 ✅ |
-| `charts.py` | gráficos Plotly (chuva e temperatura) | 4 ✅ |
-| `ui.py` | camada visual (CSS + blocos HTML, tema claro/escuro) | 4 ✅ |
-| `app.py` | interface Streamlit (orquestração) | 4 ✅ |
+| Arquivo | Papel |
+|---|---|
+| `api.py` | **API REST (FastAPI)** — endpoints HTTP/JSON |
+| `config.py` | localização, variáveis da Open-Meteo, thresholds, config da LLM |
+| `weather_service.py` | consumo da Open-Meteo + validação com pydantic |
+| `rules_service.py` | camada de regras determinísticas (vereditos) |
+| `ai_service.py` | IA: Gemini (nuvem) ou LM Studio (local) + fallback offline |
+| `tests/test_rules.py` | testes das regras (pytest, offline) |
 
 ## Setup
 
@@ -39,84 +42,110 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Uso
+Configure a chave da IA (opcional, mas recomendado — sem ela a API responde com o
+texto determinístico): copie `.env.example` para `.env` e preencha `GEMINI_API_KEY`.
 
-Interface completa (recomendado):
-
-```powershell
-streamlit run app.py
-```
-
-Busca por cidade ou coordenadas, condições atuais, vereditos, resumo da LLM e
-gráficos de chuva/temperatura.
-
-A interface segue o design "Clima do dia" (estética desenhada à mão, azul-clima,
-semáforo de cor nos vereditos, emojis) com **toggle de tema claro/escuro** na barra
-lateral. Todo o visual (CSS e blocos HTML) vive em `ui.py`; o `app.py` só orquestra.
-
-Scripts de linha de comando (teste manual de cada camada):
+## Rodar a API
 
 ```powershell
-python weather_service.py   # previsão dos próximos dias
-python rules_service.py     # vereditos das regras
-python ai_service.py        # resumo em PT-BR (LM Studio, com fallback)
-pytest                      # testes das regras (offline)
+uvicorn api:app --reload                       # desenvolvimento (localhost:8000)
+uvicorn api:app --host 0.0.0.0 --port 8000     # acessível na rede
 ```
 
-### Camada de IA (resumo em linguagem natural)
+- **Docs interativas (Swagger):** <http://localhost:8000/docs>
+- **Docs alternativas (ReDoc):** <http://localhost:8000/redoc>
 
-O sistema suporta dois provedores, escolhidos por `LLM_PROVIDER`:
+O front-end roda em outra origem, então o **CORS está liberado** (em produção,
+restrinja `allow_origins` ao domínio real do front em `api.py`).
+
+## Endpoints
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/saude` | health check + provedor de IA ativo |
+| `GET` | `/cidades?nome=&limite=` | busca cidades por nome (geocoding) — para autocomplete |
+| `GET` | `/previsao?lat=&lon=` | dados de tempo crus (atual + 7 dias + séries horárias) |
+| `GET` | `/recomendacao?lat=&lon=` | vereditos + resumo da IA (tratado com IA) |
+| `GET` | `/clima?lat=&lon=` | **tudo em uma chamada** (previsão + vereditos + IA) |
+
+**Fluxo típico do front:** `/cidades?nome=...` (autocomplete) → escolhe a cidade e
+pega `latitude`/`longitude` → `/clima?lat=&lon=` para montar a tela inteira.
+
+Para reduzir chamadas externas (limites da Open-Meteo e cota da Gemini), a API mantém
+um **cache em memória com TTL de 30 minutos** por coordenada.
+
+### Exemplos
+
+```bash
+# Health check
+curl "http://localhost:8000/saude"
+# {"status":"ok","provedor_llm":"gemini"}
+
+# Buscar cidade
+curl "http://localhost:8000/cidades?nome=Aracaju&limite=1"
+
+# Tudo em uma chamada
+curl "http://localhost:8000/clima?lat=-10.9111&lon=-37.0717"
+```
+
+### Formato da resposta de `/clima`
+
+```jsonc
+{
+  "previsao": {
+    "latitude": -10.91, "longitude": -37.07, "timezone": "America/Sao_Paulo",
+    "current": { "temperature_2m": 25.0, "relative_humidity_2m": 80, "...": "..." },
+    "daily":   { "time": ["2026-06-10", "..."], "precipitation_sum": [0.9, "..."], "...": "..." },
+    "hourly":  { "...": "..." }
+  },
+  "vereditos": {
+    "pulverizacao": { "status": "nao_recomendado", "motivo": "...", "dados_de_apoio": { "...": "..." } },
+    "irrigacao":    { "status": "sugerida",        "motivo": "...", "dados_de_apoio": { "...": "..." } },
+    "geada":        { "status": "sem_risco",       "motivo": "...", "dados_de_apoio": { "...": "..." } },
+    "chuva_forte":  { "status": "normal",          "motivo": "...", "dados_de_apoio": { "...": "..." } }
+  },
+  "recomendacao": {
+    "texto": "Hoje teremos chuvas leves...",
+    "usou_llm": true                // false => veio do fallback determinístico (IA offline/cota)
+  }
+}
+```
+
+## Camada de IA
+
+A API suporta dois provedores, escolhidos por `LLM_PROVIDER`:
 
 | Provedor | Quando usar | Configuração |
 |---|---|---|
-| **Gemini** (nuvem) | publicação / deploy | `GEMINI_API_KEY` (env ou `st.secrets`) |
+| **Gemini** (nuvem) | produção / deploy | `GEMINI_API_KEY` (variável de ambiente) |
 | **LM Studio** (local) | desenvolvimento sem custo | servidor em `localhost:1234` |
 
 No modo padrão (`LLM_PROVIDER=auto`): usa **Gemini se houver chave**, senão o
-**LM Studio local**, senão um **texto determinístico** gerado pelas próprias
-regras. Ou seja, **o sistema nunca fica sem resposta** — e nenhum segredo fica no
-código.
+**LM Studio local**, senão o **texto determinístico** das regras.
 
-**Gemini (recomendado para deploy):**
+**Gemini:**
 
-1. Crie uma chave em <https://aistudio.google.com/apikey> (free tier suficiente).
-2. Local: copie `.env.example` para `.env` e preencha `GEMINI_API_KEY`
-   (ou exporte a variável no terminal).
-3. Modelo padrão: `gemini-flash-latest` (aponta para o flash mais novo, funciona no
-   free-tier). Ajuste com `GEMINI_MODELO`. ⚠️ Os modelos **Pro** (`gemini-2.5-pro`,
-   `gemini-3-pro-preview`) exigem **billing ativo** — sem ele retornam `429` e o app
-   cai no texto offline determinístico.
+1. Crie uma chave em <https://aistudio.google.com/apikey>.
+2. Preencha `GEMINI_API_KEY` no `.env`.
+3. Modelo padrão recomendado para free-tier: `gemini-flash-lite-latest` (cota grátis
+   maior, menos `429`). Ajuste com `GEMINI_MODELO`. A cota é **por modelo**; se um
+   estourar, troque por outro lite (ex.: `gemini-2.5-flash-lite`). Modelos **Pro**
+   exigem billing. Detalhes em `HANDOFF.md`.
 
-**LM Studio (local):** rode um modelo (ex.: Llama 3.1 8B Instruct ou Qwen 2.5 7B)
-com o servidor local ativo em `localhost:1234`.
+## Testes
 
-### Deploy (Streamlit Community Cloud)
-
-1. Suba o repositório no GitHub (o `.env` e `secrets.toml` ficam de fora pelo
-   `.gitignore`).
-2. Em <https://share.streamlit.io>, aponte para `app.py`.
-3. Em **Settings → Secrets**, cole sua chave (veja
-   `.streamlit/secrets.toml.example`):
-   ```toml
-   GEMINI_API_KEY = "sua-chave"
-   ```
-   O `app.py` faz a ponte de `st.secrets` para as variáveis de ambiente.
+```powershell
+pytest                      # testes das regras determinísticas (offline)
+python weather_service.py   # teste manual: previsão dos próximos dias
+python rules_service.py     # teste manual: vereditos das regras
+python ai_service.py        # teste manual: resumo em PT-BR (com fallback)
+```
 
 ## Configuração
 
 Ajuste `config.py`:
 
-- **Localização**: `LATITUDE_PADRAO` / `LONGITUDE_PADRAO` (padrão: Aracaju/SE).
-- **Thresholds agronômicos**: classe `Thresholds`. São pontos de partida —
-  revisar com fonte técnica (Embrapa, etc.) antes de uso real.
-- **LLM**: `LM_STUDIO_URL` (servidor OpenAI-compatible em `localhost:1234`).
-
-## Roadmap
-
-- [x] Fase 1 — núcleo de dados (`weather_service.py` + pydantic)
-- [x] Fase 2 — regras determinísticas + testes
-- [x] Fase 3 — LLM (`ai_service.py` via LM Studio + fallback offline)
-- [x] Fase 4 — interface (Streamlit + Plotly)
-- [x] Fase 5 — geocoding por nome de cidade (`buscar_cidade`)
-- [x] Fase 6 — redesign "Clima do dia" (`ui.py`, tema claro/escuro) — ver `HANDOFF.md`
-- [ ] Fase 6 (extra) — histórico de 30 dias, deploy
+- **Localização padrão**: `LATITUDE_PADRAO` / `LONGITUDE_PADRAO` (padrão: Aracaju/SE).
+- **Thresholds agronômicos**: classe `Thresholds`. São pontos de partida — revisar
+  com fonte técnica (Embrapa, etc.) antes de uso real.
+- **LM Studio**: `LM_STUDIO_URL` (servidor OpenAI-compatible em `localhost:1234`).
